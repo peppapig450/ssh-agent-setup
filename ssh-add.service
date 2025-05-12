@@ -1,0 +1,13 @@
+[Unit]
+Description=Add SSH key(s) to agent
+After=ssh-agent.service
+Requires=ssh-agent.service
+
+[Service]
+Type=oneshot
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+ExecStartPre=/bin/sh -c 'i=0; while [ ! -S "${XDG_RUNTIME_DIR}/ssh-agent.socket" ]; do [ $i -ge 10 ] && exit 1; sleep 0.5; i=$((i+1)); done'
+# INSERT KEYS HERE
+
+[Install]
+WantedBy=default.target

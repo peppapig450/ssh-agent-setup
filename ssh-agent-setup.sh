@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+
+# ----------------------------------------------------------------------------------
+# ssh-agent-setup.sh
+#
+# Description:
+#   This script automates the setup of systemd user services for managing the
+#   SSH agent (`ssh-agent.service`) and automatically adding one or more
+#   private SSH keys via `ssh-add.service`. It supports both non-interactive
+#   and interactive modes.
+#
+#   It performs the following steps:
+#     - Validates required dependencies (`systemctl`, `awk`, `grep`, `ssh-add`)
+#     - Parses SSH private key paths from CLI arguments or user input
+#     - Validates that each key is readable and exists
+#     - Creates or updates `~/.config/systemd/user/ssh-add.service` by injecting
+#       ExecStart lines for each provided SSH key
+#     - Symlinks `ssh-agent.service` into the user systemd directory
+#     - Appends `SSH_AUTH_SOCK` export to the user shell rc file (bash or zsh)
+#     - Reloads systemd user daemon and starts/enables both services
+#
+# Usage:
+#   ./ssh-agent-setup.sh [key1 [key2 ...]]
+#
+# Options:
+#   -h, --help      Show usage information
+#
+# Notes:
+#   - If no key paths are provided as arguments, the script prompts the user
+#     to enter them interactively (if stdin is a terminal).
+#   - The script assumes the existence of `ssh-agent.service` and a template
+#     `ssh-add.service` file with the line "# INSERT KEYS HERE" as a placeholder.
+# ----------------------------------------------------------------------------------
+set -Eeuo pipefail
+trap 'log_error "Script failed at line ${LINENO}." && exit 1' ERR
+
+# Print informational messages with a standardized prefix.
+log_info() {
+	printf '[INFO]	%s\n' "$*"
+}
+
+# Print error messages to stderr with a standard prefix.
+log_error() {
+	printf '[ERROR]	%s\n' "$*" >&2
+}
+
+# Show usage details and exit.
+usage() {
+	cat <<'GET_YO_KEYS_WET'
+Usage: $(basename "${0}") [key1 [key2...]]
+Options:
+	-h, --help	Show this help message and exit.
+
+If no keys are provided as arguments, you will be prompted (interactive only)
+to enter one or more paths to SSH private key files to auto-load.
+GET_YO_KEYS_WET
+	exit 1
+}
+
+# Parse command-line arguments and collect SSH key paths.
+parse_args() {
+	KEYS=()
+
+	while [[ $# -gt 0 ]]; do
+		case "${1}" in
+			-h|--help) usage ;;
+			--) shift; break ;;
+			-*)
+				log_error "Unknown option: ${1}"
+				usage
+				;;
+			*)
+				KEYS+=("${1}")
+				shift
+				;;
+		esac
+	done
+
+	if [[ ${#KEYS[@]} -eq 0 ]]; then
+		if [[ -t 0 ]]; then
+			read -rp "Enter SSH key path(s) (space-separated): " -a KEYS
+			(( ${#KEYS[@]} > 0 )) || usage 
+		else
+			usage
+		fi
+	fi
+}
+
+# Verify required external commands exist.
+check_dependencies() {
+	local deps=(systemctl awk grep ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+	for cmd in "${deps[@]}"; do
+		if ! command -v "${cmd}" >/dev/null 2>&1; then
+			log_error "Required command '${cmd}' not found."
+			exit 1
+		fi
+	done
+}
+
+# Initialize paths for templates and output
+init_paths() {
+	local config_home="${XDG_CONFIG_HOME:-${HOME}}/.config"
+
+	SERVICE_DIR="${config_home}/systemd/user"
+	SRC_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	TEMPLATE_ADD_SERVICE="${SRC_DIR}/ssh-add.service"
+	AGENT_SERVICE_SRC="${SRC_DIR}/ssh-agent.service"
+	FINAL_ADD_SERVICE="${SERVICE_DIR}/ssh-add.service"
+}
+
+# Ensure the systemd user directory exists.
+prepare_service_dir() {
+	mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
+	log_info "Service directory ensured: ${SERVICE_DIR}"
+}
+
+# Symlink the ssh-agent.service template.
+link_agent() {
+	if [[ -f ${AGENT_SERVICE_SRC} ]]; then
+		# XXX: switch to using install?
+		ln -nfs -- "${AGENT_SERVICE_SRC}" "${SERVICE_DIR}/ssh-agent.service"
+		log_info "Linked ssh-agent.service"
+	else
+		log_error "Template missing: ${AGENT_SERVICE_SRC}"
+		exit 1
+	fi
+}
+
+# Expand '~' in key paths because ssh-add is dumb.
+# Also make sure each key actually exists and is readable.
+validate_keys() {
+	local key
+
+	for i in "${!KEYS[@]}"; do
+		key="${KEYS[i]}"
+		[[ ${key} == ~* ]] && key="${key/#\~/${HOME}}"
+		if [[ ! -r ${key} ]]; then
+			log_error "SSH key not found or unreadable: ${key}"
+			exit 1
+		fi
+		KEYS[i]="${key}"
+	done
+}
+
+# Build ssh-add.service by injecting ExecStart lines with awk.
+generate_add_service() {
+	local keys_concat ssh_add_bin
+	# join keys into a newline-separated string for awk
+	keys_concat=$(printf '%s\n' "${KEYS[@]}")
+	ssh_add_bin=$(command -v ssh-add) || {
+		log_error "ssh-add not found.. Why are you running an ssh-add script?"
+		exit 1
+	}
+
+	# XXX: this could probably be perl (dark magic)
+	awk \
+		-v keys="${keys_concat}" \
+		-v ssh_add="${ssh_add_bin}" '
+		BEGIN {
+			# Split newline-separated keys into array
+			n = split(keys, arr, "\n")
+		}
+
+		# When we hit the magic comment line, POOF! in goes
+		# the ExecStart lines with our SSH key files
+		$0 == "# INSERT KEYS HERE" {
+			for (i = 1; i <= n; i++)
+				printf("ExecStart=%s %s\n", ssh_add, arr[i])
+			next
+		}
+		# Leave the other lines alone
+		{ print }
+	' "${TEMPLATE_ADD_SERVICE}" > "${FINAL_ADD_SERVICE}"
+
+	chmod 644 "${FINAL_ADD_SERVICE}"
+	log_info "Created ssh-add.service with keys: \"${KEYS[*]}\""
+}
+
+# Append SSH_AUTH_SOCK export to shell RC if missing.
+patch_shell_rc() {
+	local shell_name rc_file export_line
+	shell_name="$(basename "${SHELL:-bash}")"
+	
+	case "${shell_name}" in
+		bash) rc_file="${HOME}/.bashrc" ;;
+		zsh) rc_file="${HOME}/.zshrc" ;;
+		# XXX: this can be easily extended for fish, nu shell, or wtv...
+		# IDK how to export vars in those shells though
+		# and I don't use them so.
+		*)
+			log_error "Unsupported shell: ${shell_name}"
+			exit 1
+			;;
+	esac
+
+	# ensure RC file exists
+	if [[ ! -f ${rc_file} ]]; then
+		touch "${rc_file}"
+		log_info "Created shell rc file: ${rc_file}"
+	fi
+
+	# We don't want the $XDG_RUNTIME_DIR expanded until $rc_file is loaded.
+	# So ignore shellcheck complaining about single quotes.
+	# shellcheck disable=SC2016 
+	export_line='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+	if ! grep -qxF "${export_line}" "${rc_file}"; then
+		cat <<-BOOM_SHAKALAKA >> "${rc_file}"
+			
+			# Added by ssh-agent setup
+			${export_line}
+		BOOM_SHAKALAKA
+		log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
+	else
+		log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
+	fi
+}
+
+# Reload user daemon and enable/start services.
+reload_and_start() {
+	systemctl --user daemon-reload
+	systemctl --user enable --now ssh-agent.service ssh-add.service
+	log_info "Enabled and started ssh-agent & ssh-add services"
+}
+
+
+# Main entrypoint.
+main() {
+    parse_args "$@"
+    check_dependencies
+    init_paths
+    prepare_service_dir
+    link_agent
+    validate_keys
+    generate_add_service
+    patch_shell_rc
+    reload_and_start
+}
+
+# HERE WE GO!
+main "$@"
