@@ -87,7 +87,7 @@ parse_args() {
         break
         ;;
       -*)
-        log_error "Unknown option: ${1}"
+        logging::log_error "Unknown option: ${1}"
         usage
         ;;
       *)
@@ -113,8 +113,7 @@ check_dependencies() {
 
   for cmd in "${deps[@]}"; do
     if ! command -v "${cmd}" >/dev/null 2>&1; then
-      log_error "Required command '${cmd}' not found."
-      exit 1
+      logging::log_fatal "Required command '${cmd}' not found."
     fi
   done
 }
@@ -133,7 +132,7 @@ init_paths() {
 # Ensure the systemd user directory exists.
 prepare_service_dir() {
   mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
-  log_info "Service directory ensured: ${SERVICE_DIR}"
+  logging::log_info "Service directory ensured: ${SERVICE_DIR}"
 }
 
 # Symlink the ssh-agent.service template.
@@ -141,10 +140,9 @@ link_agent() {
   if [[ -f ${AGENT_SERVICE_SRC} ]]; then
     # XXX: switch to using install?
     ln -nfs -- "${AGENT_SERVICE_SRC}" "${SERVICE_DIR}/ssh-agent.service"
-    log_info "Linked ssh-agent.service"
+    logging::log_info "Linked ssh-agent.service"
   else
-    log_error "Template missing: ${AGENT_SERVICE_SRC}"
-    exit 1
+    logging::log_fatal "Template missing: ${AGENT_SERVICE_SRC}"
   fi
 }
 
@@ -160,8 +158,7 @@ validate_keys() {
     key="${keys_ref[i]}"
     [[ ${key} == ~* ]] && key="${key/#\~/${HOME}}"
     if [[ ! -r ${key} ]]; then
-      log_error "SSH key not found or unreadable: ${key}"
-      exit 1
+      logging::log_fatal "SSH key not found or unreadable: ${key}"
     fi
     keys_ref[i]="${key}"
   done
@@ -177,8 +174,7 @@ generate_add_service() {
   # join keys into a newline-separated string for awk
   keys_concat=$(printf '%s\n' "${keys_ref[@]}")
   ssh_add_bin=$(command -pv ssh-add) || {
-    log_error "ssh-add not found.. Why are you running an ssh-add script?"
-    exit 1
+    logging::log_fatal "ssh-add not found.. Why are you running an ssh-add script?"
   }
 
   # XXX: this could probably be perl (dark magic)
@@ -202,7 +198,7 @@ generate_add_service() {
 	' "${TEMPLATE_ADD_SERVICE}" >"${FINAL_ADD_SERVICE}"
 
   chmod 600 "${FINAL_ADD_SERVICE}"
-  log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
+  logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
 }
 
 # Append SSH_AUTH_SOCK export to shell RC if missing.
@@ -217,15 +213,14 @@ patch_shell_rc() {
     # IDK how to export vars in those shells though
     # and I don't use them so.
     *)
-      log_error "Unsupported shell: ${shell_name}"
-      exit 1
+      logging::log_fatal "Unsupported shell: ${shell_name}"
       ;;
   esac
 
   # ensure RC file exists
   if [[ ! -f ${rc_file} ]]; then
     touch "${rc_file}"
-    log_info "Created shell rc file: ${rc_file}"
+    logging::log_info "Created shell rc file: ${rc_file}"
   fi
 
   # We don't want the $XDG_RUNTIME_DIR expanded until $rc_file is loaded.
@@ -238,9 +233,9 @@ patch_shell_rc() {
 			# Added by ssh-agent setup
 			${export_line}
 		BOOM_SHAKALAKA
-    log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
+    logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
   else
-    log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
+    logging::log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
   fi
 }
 
@@ -248,13 +243,14 @@ patch_shell_rc() {
 reload_and_start() {
   systemctl --user daemon-reload
   systemctl --user enable --now ssh-agent.service ssh-add.service
-  log_info "Enabled and started ssh-agent & ssh-add services"
+  logging::log_info "Enabled and started ssh-agent & ssh-add services"
 }
 
 # Main entrypoint.
 main() {
   local -a keys=() # Pass keys around via nameref
 
+  resolve_and_source_logging
   parse_args keys "$@"
   check_dependencies
   init_paths
