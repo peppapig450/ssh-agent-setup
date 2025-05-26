@@ -32,17 +32,33 @@
 #     `ssh-add.service` file with the line "# INSERT KEYS HERE" as a placeholder.
 # ----------------------------------------------------------------------------------
 set -Eeuo pipefail
-trap 'log_error "Script failed at line ${LINENO}." && exit 1' ERR
 
-# Print informational messages with a standardized prefix.
-log_info() {
-  printf '[INFO]	%s\n' "$*"
+# resolve_and_source_logging
+#
+# Resolves this script's directory, builds the path to the logging library
+# (assumed at ../../logging.shlib), and sources it. Exits if missing.
+#
+# This loads the namespaced logging functions defined in logging.shlib:
+#   - logging::log_info, logging::log_warn, logging::log_error, logging::log_fatal
+#   - logging::add_err_trap, logging::trap_err_handler
+#
+# The `logging::` prefix follows the convention described in the
+# Google Shell Style Guide: https://google.github.io/styleguide/shellguide.html
+resolve_and_source_logging() {
+  local script_dir logging_path
+
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  logging_path="$(realpath "${script_dir}/../../logging.shlib")"
+
+  if [[ -f ${logging_path} ]]; then
+    # shellcheck source=../../logging.shlib
+    source "${logging_path}"
+  else
+    printf "Something went wrong sourcing the logging lib: %s\n" "${logging_path}" >&2
+    exit 1
+  fi
 }
 
-# Print error messages to stderr with a standard prefix.
-log_error() {
-  printf '[ERROR]	%s\n' "$*" >&2
-}
 
 # Show usage details and exit.
 usage() {
