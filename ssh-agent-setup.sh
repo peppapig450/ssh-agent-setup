@@ -195,8 +195,8 @@ patch_shell_rc() {
   shell_name="$(basename "${SHELL:-bash}")"
 
   case "${shell_name}" in
-    bash) rc_file="${HOME}/.bashrc" ;;
-    zsh) rc_file="${HOME}/.zshrc" ;;
+    bash) rc_file="${HOME}/.bash_profile" ;;
+    zsh) rc_file="${HOME}/.zprofile" ;;
     # XXX: this can be easily extended for fish, nu shell, or wtv...
     # IDK how to export vars in those shells though
     # and I don't use them so.
