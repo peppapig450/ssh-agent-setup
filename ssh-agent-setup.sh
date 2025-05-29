@@ -458,40 +458,24 @@ generate_add_service() {
 
 # Append SSH_AUTH_SOCK export to shell RC if missing.
 patch_shell_rc() {
-  local shell_name rc_file export_line
-  shell_name="$(basename "${SHELL:-bash}")"
+  local -n rc_files_to_patch="${1}"
+  local export_line='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
 
-  case "${shell_name}" in
-    bash) rc_file="${HOME}/.bash_profile" ;;
-    zsh) rc_file="${HOME}/.zprofile" ;;
-    # XXX: this can be easily extended for fish, nu shell, or wtv...
-    # IDK how to export vars in those shells though
-    # and I don't use them so.
-    *)
-      logging::log_fatal "Unsupported shell: ${shell_name}"
-      ;;
-  esac
+  for shell in "${!rc_files_to_patch[@]}"; do
+    local rc_file="${rc_files_to_patch["${shell}"]}"
+    logging::log_info "Setting up SSH_AUTH_SOCK for ${shell}"
 
-  # ensure RC file exists
-  if [[ ! -f ${rc_file} ]]; then
-    touch "${rc_file}"
-    logging::log_info "Created shell rc file: ${rc_file}"
-  fi
-
-  # We don't want the $XDG_RUNTIME_DIR expanded until $rc_file is loaded.
-  # So ignore shellcheck complaining about single quotes.
-  # shellcheck disable=SC2016
-  export_line='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
-  if ! grep -qxF "${export_line}" "${rc_file}"; then
-    cat <<-BOOM_SHAKALAKA >>"${rc_file}"
-			
-			# Added by ssh-agent setup
-			${export_line}
-		BOOM_SHAKALAKA
-    logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
-  else
-    logging::log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
-  fi
+    if ! grep -qxF "${export_line}" "${rc_file}"; then
+      cat <<- BOOM_SHAKALAKA >> "${rc_file}"
+  
+  # Added by ssh-agent-setup
+  ${export_line}
+BOOM_SHAKALAKA
+      logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
+    else
+      logging::log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
+    fi
+  done
 }
 
 # Reload user daemon and enable/start services.
