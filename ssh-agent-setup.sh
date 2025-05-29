@@ -173,6 +173,54 @@ shell::get_current_shell_name() {
   printf "%s\n" "${shell_name##*/}" # Prints the basename
 }
 
+# shell::get_enabled_shells <in-map> <out-map>
+#   Populate out-map with only those shells present in /etc/shells and on $PATH.
+shell::get_enabled_shells() {
+  local -n shell_rc_map_ref="${1}"
+  local -n enabled_shell_rc_map_ref="${2}"
+
+  # Parse /etc/shells and deduplicate entries by basename,
+  # preferring /usr/bin/* over /bin/* when duplicates exist.
+  # This avoids shell path ambiguity (e.g., both /bin/zsh and /usr/bin/zsh),
+  # and aligns better with what command -v outputs.
+  # Using Perl here for sane text handling and associative hash logic in one pass.
+  mapfile -t valid_shells < <(
+    perl -ne '
+      next unless m{^/}; # Skip non-path lines
+      chomp;
+      ($base = $_) =~ s{^/usr/bin/|^/bin/}{}; # Strip leading path to get shell name
+      $best{$base} = $_ if ! $best{$base} || $best{$base} =~ m{^/bin}; # Prefer /usr/bin
+      END { print "$_\n" for sort values %best }
+    ' /etc/shells
+  ) \
+    && ((${#valid_shells[@]} > 0)) \
+    || logging::log_fatal "No valid shells found in /etc/shells"
+
+  for shell in "${!shell_rc_map_ref[@]}"; do
+    local shell_path
+
+    if shell_path="$(command -v -- "${shell}" 2> /dev/null)"; then
+      :
+    else
+      logging::log_info "Skipping ${shell} (not installed)"
+      continue
+    fi
+
+    local -i is_valid_shell=0
+    for valid in "${valid_shells[@]}"; do
+      if [[ ${shell_path} == "${valid}" ]]; then
+        is_valid_shell=1
+        break
+      fi
+    done
+
+    if ((is_valid_shell)); then
+      enabled_shell_rc_map_ref["${shell}"]="${shell_rc_map_ref["${shell}"]}"
+    else
+      logging::log_info "Skipping ${shell} (not found in /etc/shells)"
+    fi
+  done
+}
 }
 
 # Ensure the systemd user directory exists.
