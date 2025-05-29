@@ -72,17 +72,16 @@ source_and_setup_logging() {
   if [[ -f ${logging_path} ]]; then
     # shellcheck source=../../shell/general/logging.shlib
     source "${logging_path}"
-logging::init "$0"
+    logging::init "$0"
   else
     printf "Something went wrong sourcing the logging lib: %s\n" "${logging_path}" >&2
     exit 1
   fi
 }
 
-
 # Show usage details and exit.
 usage() {
-  cat <<GET_YO_KEYS_WET
+  cat << GET_YO_KEYS_WET
 Usage: $(basename "${0}") [key1 [key2...]]
 Options:
 	-h, --help	Show this help message and exit.
@@ -132,7 +131,7 @@ check_dependencies() {
   local deps=(systemctl awk grep ssh-add) # Check grep and awk in case someone manages to run this on a toaster
 
   for cmd in "${deps[@]}"; do
-    if ! command -v "${cmd}" >/dev/null 2>&1; then
+    if ! command -v "${cmd}" > /dev/null 2>&1; then
       logging::log_fatal "Required command '${cmd}' not found."
     fi
   done
@@ -168,7 +167,7 @@ shell::get_current_shell_name() {
   local shell_name
 
   shell_name="$(ps -p $$ -o comm=)"
-# Strip path and leading dash to get clean shell name (e.g., 'bash', 'zsh')
+  # Strip path and leading dash to get clean shell name (e.g., 'bash', 'zsh')
   shell_name="${shell_name#-}"
   printf "%s\n" "${shell_name##*/}" # Prints the basename
 }
@@ -450,7 +449,7 @@ generate_add_service() {
 		}
 		# Leave the other lines alone
 		{ print }
-	' "${TEMPLATE_ADD_SERVICE}" >"${FINAL_ADD_SERVICE}"
+	' "${TEMPLATE_ADD_SERVICE}" > "${FINAL_ADD_SERVICE}"
 
   chmod 600 "${FINAL_ADD_SERVICE}"
   logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
@@ -493,7 +492,7 @@ reload_and_start() {
 # 5) reload and start
 main() {
   local -a keys=() # Pass keys around via nameref
-local -A shell_rc_map
+  local -A shell_rc_map
   local -A enabled_shell_rc_map
   local -A selected_shells
   local -A resolved_rc_files_to_patch
@@ -523,6 +522,6 @@ local -A shell_rc_map
 
 # Make sure main is only ran if executed and not
 # if it is sourced.
-if ! (return 0 2>/dev/null); then
+if ! (return 0 2> /dev/null); then
   main "$@"
 fi
