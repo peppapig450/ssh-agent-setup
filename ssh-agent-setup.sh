@@ -33,7 +33,23 @@
 # ----------------------------------------------------------------------------------
 set -Eeuo pipefail
 
-# resolve_and_source_logging
+# Helper function to resolve symlinks to their real canonical path
+# Tries in order: realpath -> readlink -f -> fallback (errors if still a symlink)
+resolve_file_path() {
+  local path="${1}"
+
+  if command -v realpath > /dev/null 2>&1; then
+    realpath -- "${path}" 2> /dev/null || printf "%s\n" "${path}"
+  elif command -v readlink > /dev/null 2>&1 && readlink -f -- / > /dev/null 2>&1; then
+    readlink -f -- "${path}" 2> /dev/null || printf "%s\n" "${path}"
+  else
+    if [[ -L ${path} ]]; then
+      printf "Error: Cannot resolve symlink '%s' and no suitable tool is available.\n" "${path}" >&2
+      exit 1
+    fi
+    printf "%s\n" "${path}"
+  fi
+}
 #
 # Resolves this script's directory, builds the path to the logging library
 # (assumed at ../../logging.shlib), and sources it. Exits if missing.
