@@ -485,11 +485,21 @@ reload_and_start() {
   logging::log_info "Enabled and started ssh-agent & ssh-add services"
 }
 
-# Main entrypoint.
+# main:
+# 1) setup logging
+# 2) build and filter shell -> rc map
+# 3) prompt user for shells
+# 4) generate systemd services & patch RCs
+# 5) reload and start
 main() {
   local -a keys=() # Pass keys around via nameref
+local -A shell_rc_map
+  local -A enabled_shell_rc_map
+  local -A selected_shells
+  local -A resolved_rc_files_to_patch
 
-  resolve_and_source_logging
+  source_and_setup_logging
+
   parse_args keys "$@"
   check_dependencies
   init_paths
@@ -497,7 +507,17 @@ main() {
   link_agent
   validate_keys keys
   generate_add_service keys
-  patch_shell_rc
+
+  shell::init_shell_rc_map shell_rc_map
+  shell::get_enabled_shells shell_rc_map enabled_shell_rc_map
+  shell::prompt_user_selection enabled_shell_rc_map selected_shells || {
+    logging::log_warn "Shell selection aborted. Exiting."
+    exit 0
+  }
+  shell::print_selected_shells selected_shells
+
+  resolve_all_rc_files selected_shells resolved_rc_files_to_patch
+  patch_shell_rc resolved_rc_files_to_patch
   reload_and_start
 }
 
