@@ -162,6 +162,17 @@ shell::init_shell_rc_map() {
     # XXX: nu-shell, etc.. could go here
   )
 }
+
+# Helper function to infer the current shell name if the user hasn't explicitly selected one.
+shell::get_current_shell_name() {
+  local shell_name
+
+  shell_name="$(ps -p $$ -o comm=)"
+# Strip path and leading dash to get clean shell name (e.g., 'bash', 'zsh')
+  shell_name="${shell_name#-}"
+  printf "%s\n" "${shell_name##*/}" # Prints the basename
+}
+
 }
 
 # Ensure the systemd user directory exists.
