@@ -50,25 +50,29 @@ resolve_file_path() {
     printf "%s\n" "${path}"
   fi
 }
+
+# source_and_setup_logging
 #
 # Resolves this script's directory, builds the path to the logging library
-# (assumed at ../../logging.shlib), and sources it. Exits if missing.
+# (assumed at ../../shell/general/logging.shlib), and sources it. Exits if missing.
 #
 # This loads the namespaced logging functions defined in logging.shlib:
-#   - logging::log_info, logging::log_warn, logging::log_error, logging::log_fatal
-#   - logging::add_err_trap, logging::trap_err_handler
+#   - logging::init logging::log_info, logging::log_warn, logging::log_error,
+#   - logging::log_fatal, logging::add_err_trap, logging::trap_err_handler
+#   - logging::setup_traps logging::add_exit_trap
 #
 # The `logging::` prefix follows the convention described in the
 # Google Shell Style Guide: https://google.github.io/styleguide/shellguide.html
-resolve_and_source_logging() {
+source_and_setup_logging() {
   local script_dir logging_path
 
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  logging_path="$(realpath "${script_dir}/../../logging.shlib")"
+  logging_path="$(resolve_file_path "${script_dir}/../../shell/general/logging.shlib")"
 
   if [[ -f ${logging_path} ]]; then
-    # shellcheck source=../../logging.shlib
+    # shellcheck source=../../shell/general/logging.shlib
     source "${logging_path}"
+logging::init "$0"
   else
     printf "Something went wrong sourcing the logging lib: %s\n" "${logging_path}" >&2
     exit 1
