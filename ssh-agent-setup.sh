@@ -221,6 +221,101 @@ shell::get_enabled_shells() {
     fi
   done
 }
+
+# shell::prompt_user_selection <enabled-map> <selected-map>
+#   Present an indexed list of shells (with fzf or fallback), fill selected-map.
+shell::prompt_user_selection() {
+  local -n enabled_shell_rc_map_ref="${1}"
+  local -n selected_shells_ref="${2}"
+
+  local -A index_to_shell
+  local -a selections
+  local -i i=1
+  local shell
+
+  local arrow="->"
+  if encoding="$(locale charmap 2> /dev/null)"; then
+    if [[ ${encoding} == "UTF-8" ]]; then
+      logging::log_info "Unicode support detected, enabling pretty things!"
+      arrow=$'\u2192'
+    else
+      logging::log_warn "No Unicode support. Using ANSI fallback."
+    fi
+  fi
+
+  printf "Available shells:\n"
+  while IFS= read -r -d '' shell; do
+    printf "  [%-2d] %-20s %s %s\n" "${i}" "${shell}" "${arrow}" "${enabled_shell_rc_map_ref["${shell}"]}"
+    index_to_shell["${i}"]="${shell}"
+    ((i++))
+  done < <(printf "%s\0" "${!enabled_shell_rc_map_ref[@]}" | sort -z)
+
+  # Use fzf if available for cleaner selection, if not fallback to read
+  if command -v fzf > /dev/null 2>&1; then
+    logging::log_info "fzf detected. Launching interactive selector..."
+    mapfile -t selections < <(printf "%s\n" "${!enabled_shell_rc_map_ref[@]}" | fzf --multi --prompt="Select shells: ")
+  else
+    if ! [[ -t 0 ]]; then
+      logging::log_warn "Non-interactive session detected and fzf is not available."
+      logging::log_warn "Skipping shell RC update."
+      return 1
+    fi
+    
+    read -rp "Enter the number(s) of the shells to modify (e.g., 1 3): " -a indices
+
+    if ((${#indices[@]} == 0)); then
+      local current_shell
+      current_shell="$(shell::get_current_shell_name)"
+
+      if [[ -n ${current_shell} && -v ${enabled_shell_rc_map_ref[${current_shell}]} ]]; then
+        logging::log_info "No selection made; defaulting to current shell: ${current_shell}"
+        selected_shells_ref["${current_shell}"]="${enabled_shell_rc_map_ref["${current_shell}"]}"
+        return
+      else
+        read -rp "Unable to detect shell. Apply to all available shells? [y/N] " confirm_all
+        case "${confirm_all@L}" in
+          y | yes)
+            for shell in "${!enabled_shell_rc_map_ref[@]}"; do
+              selected_shells_ref["$shell"]="${enabled_shell_rc_map_ref[$shell]}"
+            done
+            ;;
+          *)
+            logging::log_info "Skipping shell RC update."
+            return 1
+            ;;
+        esac
+      fi
+    fi
+
+    for index in "${indices[@]}"; do
+      if ! [[ ${index} =~ ^[0-9]+$ ]]; then
+        logging::log_warn "Invalid input (not a number): ${index}"
+        continue
+      fi
+
+      shell="${index_to_shell["${index}"]}"
+      if [[ -n ${shell} ]]; then
+        selections+=("${shell}")
+      else
+        logging::log_warn "No shell mapped to index: ${index}"
+      fi
+    done
+  fi
+
+  for shell in "${selections[@]}"; do
+    selected_shells_ref["${shell}"]="${enabled_shell_rc_map_ref["${shell}"]}"
+  done
+}
+
+# shell::print_selected_shells <selected-map>
+#   Log each shell and its RC file that will be patched.
+shell::print_selected_shells() {
+  local -n selected_shells_ref="${1}"
+
+  for shell in "${!selected_shells_ref[@]}"; do
+    local rc_file="${selected_shells_ref["${shell}"]}"
+    logging::log_info "Would update ${shell} RC file at ${rc_file}"
+  done
 }
 
 # Ensure the systemd user directory exists.
