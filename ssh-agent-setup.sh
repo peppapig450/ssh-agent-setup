@@ -318,6 +318,72 @@ shell::print_selected_shells() {
   done
 }
 
+chezmoi::load_helpers() {
+  if ! command -v chezmoi >/dev/null || ! command -v jq >/dev/null; then
+    return 1
+  fi
+
+  chezmoi::get_managed_mappings() {
+    chezmoi managed -i files -p all -f json |
+      jq -er 'to_entries[] | [.value.absolute, .value.sourceAbsolute] | @tsv'
+  }
+
+  chezmoi::populate_map() {
+    local -n chezmoi_map_ref="${1}"
+
+    local output
+    if ! output="$(chezmoi::get_managed_mappings)"; then
+      logging::log_warn "chezmoi::get_managed_mappings failed"
+      return 1
+    fi
+
+    while IFS=$'\t' read -r real source; do
+      [[ -z ${real} || -z ${source} ]] && continue
+      chezmoi_map_ref["${real}"]="${source}"
+    done <<< "${output}"
+  }
+  return 0
+}
+
+resolve_all_rc_files() {
+  local -n input_shells_ref="${1}"
+  local -n output_files_ref="${2}"
+  local -i check_chezmoi=0
+
+  # If chezmoi::load_helpers returns 0 chezmoi is installed
+  # and the functions we need for this are available, so we load the map.
+  if chezmoi::load_helpers; then
+    local -A chezmoi_map
+    chezmoi::populate_map chezmoi_map
+    # XXX: maybe double-check that the mapping is populated here
+    (( ++check_chezmoi ))
+  else
+    logging::log_info "Chezmoi not installed... skipping chezmoi management checks."
+  fi
+
+  for shell in "${!input_shells_ref[@]}"; do
+    local rc_path resolved_rc_path final_rc_path
+
+    rc_path="${input_shells_ref["${shell}"]}"
+    resolved_rc_path="$(resolve_file_path "${rc_path}")"
+
+    # check chezmoi only if it's needed
+    if (( check_chezmoi == 1 )); then
+      local chezmoi_file="${chezmoi_map["${resolved_rc_path}"]-}"
+
+      if [[ -n ${chezmoi_file:-} && -f ${chezmoi_file:-} ]]; then
+        final_rc_path="${chezmoi_file}"
+      else
+        final_rc_path="${resolved_rc_path}"
+      fi
+    else
+      final_rc_path="${resolved_rc_path}"
+    fi
+
+    output_files_ref["${shell}"]="${final_rc_path}"
+  done
+}
+
 # Ensure the systemd user directory exists.
 prepare_service_dir() {
   mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
