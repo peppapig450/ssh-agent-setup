@@ -149,6 +149,21 @@ init_paths() {
   FINAL_ADD_SERVICE="${SERVICE_DIR}/ssh-add.service"
 }
 
+# shell::init_shell_rc_map <map-var>
+#   Populate an associative array mapping known shells to their RC file paths.
+shell::init_shell_rc_map() {
+  local -n shell_rc_map_ref="${1}"
+
+  shell_rc_map_ref=(
+    [bash]="${HOME}/.bash_profile"
+    [zsh]="${ZDOTDIR:-${HOME}}/.zprofile"
+    [fish]="${XDG_CONFIG_HOME:-${HOME}/.config}/fish/conf.d/ssh_agent.fish"
+    [elvish]="${XDG_CONFIG_HOME}/elvish/rc.elv" # Elvish won't even launch if XDG_CONFIG_HOME is not set
+    # XXX: nu-shell, etc.. could go here
+  )
+}
+}
+
 # Ensure the systemd user directory exists.
 prepare_service_dir() {
   mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
