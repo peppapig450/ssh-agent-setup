@@ -259,7 +259,7 @@ shell::prompt_user_selection() {
       logging::log_warn "Skipping shell RC update."
       return 1
     fi
-    
+
     read -rp "Enter the number(s) of the shells to modify (e.g., 1 3): " -a indices
 
     if ((${#indices[@]} == 0)); then
@@ -457,7 +457,8 @@ generate_add_service() {
 
 # Prompt the user to create the RC file if it is missing.
 handle_missing_rc_file() {
-  local rc_file="${1}"
+  local -r rc_file="${1}"
+  local -r export_line="${2}"
 
   read -rp "RC file '${rc_file}' does not exist. Create it? [y/N] " create_rc
   case "${create_rc@L}" in
@@ -467,6 +468,16 @@ handle_missing_rc_file() {
       return 0
       ;;
     *)
+      echo
+      logging::log_warn "Skipped creating ${rc_file}."
+      cat <<- __WAKE_UP_SUNSHINE__
+
+To enable SSH agent support for this shell, add following lines to ${rc_file}:
+
+# This agent is brought to you by ssh-agent-setup (by peppapig450)
+${export_line}
+
+__WAKE_UP_SUNSHINE__
       return 1
       ;;
   esac
@@ -482,7 +493,7 @@ patch_shell_rc() {
     logging::log_info "Setting up SSH_AUTH_SOCK for ${shell}"
 
     if [[ ! -f ${rc_file} ]]; then
-      handle_missing_rc_file "${rc_file}" || {
+      handle_missing_rc_file "${rc_file}" "${export_line}" || {
         logging::log_warn "Skipped configuring SSH_AUTH_SOCK for ${shell} (no RC file)."
         continue
       }
