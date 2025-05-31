@@ -318,13 +318,13 @@ shell::print_selected_shells() {
 }
 
 chezmoi::load_helpers() {
-  if ! command -v chezmoi >/dev/null || ! command -v jq >/dev/null; then
+  if ! command -v chezmoi > /dev/null || ! command -v jq > /dev/null; then
     return 1
   fi
 
   chezmoi::get_managed_mappings() {
-    chezmoi managed -i files -p all -f json |
-      jq -er 'to_entries[] | [.value.absolute, .value.sourceAbsolute] | @tsv'
+    chezmoi managed -i files -p all -f json \
+      | jq -er 'to_entries[] | [.value.absolute, .value.sourceAbsolute] | @tsv'
   }
 
   chezmoi::populate_map() {
@@ -355,7 +355,7 @@ resolve_all_rc_files() {
     local -A chezmoi_map
     chezmoi::populate_map chezmoi_map
     # XXX: maybe double-check that the mapping is populated here
-    (( ++check_chezmoi ))
+    ((++check_chezmoi))
   else
     logging::log_info "Chezmoi not installed... skipping chezmoi management checks."
   fi
@@ -367,7 +367,7 @@ resolve_all_rc_files() {
     resolved_rc_path="$(resolve_file_path "${rc_path}")"
 
     # check chezmoi only if it's needed
-    if (( check_chezmoi == 1 )); then
+    if ((check_chezmoi == 1)); then
       local chezmoi_file="${chezmoi_map["${resolved_rc_path}"]-}"
 
       if [[ -n ${chezmoi_file:-} && -f ${chezmoi_file:-} ]]; then
