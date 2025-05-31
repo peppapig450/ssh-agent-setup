@@ -533,6 +533,10 @@ main() {
   local -A resolved_rc_files_to_patch
 
   source_and_setup_logging
+  
+  if ! [[ -t 0 ]]; then
+    logging::log_fatal "This script must be run interactively (stdin is not a tty)."
+  fi
 
   parse_args keys "$@"
   check_dependencies
