@@ -455,6 +455,23 @@ generate_add_service() {
   logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
 }
 
+# Prompt the user to create the RC file if it is missing.
+handle_missing_rc_file() {
+  local rc_file="${1}"
+
+  read -rp "RC file '${rc_file}' does not exist. Create it? [y/N] " create_rc
+  case "${create_rc@L}" in
+    y | yes)
+      touch -- "${rc_file}"
+      logging::log_info "Created new RC file: ${rc_file}"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # Append SSH_AUTH_SOCK export to shell RC if missing.
 patch_shell_rc() {
   local -n rc_files_to_patch="${1}"
@@ -463,6 +480,13 @@ patch_shell_rc() {
   for shell in "${!rc_files_to_patch[@]}"; do
     local rc_file="${rc_files_to_patch["${shell}"]}"
     logging::log_info "Setting up SSH_AUTH_SOCK for ${shell}"
+
+    if [[ ! -f ${rc_file} ]]; then
+      handle_missing_rc_file "${rc_file}" || {
+        logging::log_warn "Skipped configuring SSH_AUTH_SOCK for ${shell} (no RC file)."
+        continue
+      }
+    fi
 
     if ! grep -qxF "${export_line}" "${rc_file}"; then
       cat <<- BOOM_SHAKALAKA >> "${rc_file}"
