@@ -467,8 +467,8 @@ patch_shell_rc() {
     if ! grep -qxF "${export_line}" "${rc_file}"; then
       cat <<- BOOM_SHAKALAKA >> "${rc_file}"
   
-  # Added by ssh-agent-setup
-  ${export_line}
+# Added by ssh-agent-setup
+${export_line}
 BOOM_SHAKALAKA
       logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
     else
