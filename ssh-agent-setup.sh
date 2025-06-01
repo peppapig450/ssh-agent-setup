@@ -4,32 +4,48 @@
 # ssh-agent-setup.sh
 #
 # Description:
-#   This script automates the setup of systemd user services for managing the
-#   SSH agent (`ssh-agent.service`) and automatically adding one or more
-#   private SSH keys via `ssh-add.service`. It supports both non-interactive
-#   and interactive modes.
+#   This script automates the setup of systemd user services to manage the SSH agent
+#   (`ssh-agent.service`) and to automatically add one or more private SSH keys via
+#   `ssh-add.service`. It supports both non-interactive and interactive modes and
+#   integrates with common shell configurations (bash, zsh, fish, elvish), as well as
+#   optionally honoring chezmoi-managed dotfiles.
 #
 #   It performs the following steps:
-#     - Validates required dependencies (`systemctl`, `awk`, `grep`, `ssh-add`)
-#     - Parses SSH private key paths from CLI arguments or user input
-#     - Validates that each key is readable and exists
-#     - Creates or updates `~/.config/systemd/user/ssh-add.service` by injecting
-#       ExecStart lines for each provided SSH key
-#     - Symlinks `ssh-agent.service` into the user systemd directory
-#     - Appends `SSH_AUTH_SOCK` export to the user shell rc file (bash or zsh)
-#     - Reloads systemd user daemon and starts/enables both services
+#     1. Initialize logging by sourcing the shared logging library.
+#     2. Ensure the script is run interactively (stdin is a TTY).
+#     3. Parse SSH private key paths from CLI arguments or prompt the user if none are provided.
+#     4. Verify that required dependencies (`systemctl`, `awk`, `grep`, `ssh-add`) are installed.
+#     5. Expand and validate each provided SSH key path (checking readability and existence).
+#     6. Determine XDG systemd user directory (`~/.config/systemd/user`) and template locations.
+#     7. Create the systemd user directory if it does not exist.
+#     8. Symlink the `ssh-agent.service` template into the user’s systemd directory.
+#     9. Generate the `ssh-add.service` file by injecting `ExecStart` lines for each SSH key.
+#    10. Populate mappings of known shells to their RC files and export commands.
+#    11. Discover which shells are installed and listed in `/etc/shells`, filtering the known set.
+#    12. Prompt the user to select one or more shells (defaults to current shell if none chosen).
+#    13. Resolve actual RC file paths, preferring chezmoi-managed files if applicable.
+#    14. For each selected shell, append the appropriate `SSH_AUTH_SOCK` export to its RC file,
+#        creating the file if it does not already exist (after user confirmation).
+#    15. Reload the systemd user daemon and enable/start both `ssh-agent.service` and
+#        `ssh-add.service` so that the agent runs at login and keys are automatically added.
 #
 # Usage:
 #   ./ssh-agent-setup.sh [key1 [key2 ...]]
 #
 # Options:
-#   -h, --help      Show usage information
+#   -h, --help      Show usage information and exit.
 #
 # Notes:
-#   - If no key paths are provided as arguments, the script prompts the user
-#     to enter them interactively (if stdin is a terminal).
-#   - The script assumes the existence of `ssh-agent.service` and a template
-#     `ssh-add.service` file with the line "# INSERT KEYS HERE" as a placeholder.
+#   - If no key paths are provided as arguments, the script prompts the user (interactive only)
+#     to enter them. If not running in a TTY, it will print usage and exit.
+#   - The script assumes the existence of:
+#       • `ssh-agent.service`      (template for the SSH agent)
+#       • `ssh-add.service`        (template containing the line "# INSERT KEYS HERE")
+#     in the same directory as this script.
+#   - Shell RC files supported out of the box: bash (`~/.bash_profile`), zsh (`~/.zprofile`),
+#     fish (`~/.config/fish/conf.d/ssh_agent.fish`), elvish (`~/.config/elvish/rc.elv`).
+#   - If a shell’s RC file is managed by chezmoi, the script will detect and patch the chezmoi
+#     source file instead of the resolved target.
 # ----------------------------------------------------------------------------------
 set -Eeuo pipefail
 
@@ -128,7 +144,7 @@ parse_args() {
 
 # Verify required external commands exist.
 check_dependencies() {
-  local deps=(systemctl awk grep ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+  local deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
 
   for cmd in "${deps[@]}"; do
     if ! command -v "${cmd}" > /dev/null 2>&1; then
@@ -538,7 +554,7 @@ patch_shell_rc() {
 
     if ! grep -qxF "${export_line}" "${rc_file}"; then
       cat <<- BOOM_SHAKALAKA >> "${rc_file}"
-  
+
 # Added by ssh-agent-setup
 ${export_line}
 BOOM_SHAKALAKA
