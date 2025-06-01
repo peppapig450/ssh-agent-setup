@@ -162,6 +162,40 @@ shell::init_shell_rc_map() {
   )
 }
 
+# shell::init_export_map <map-var>
+#   Populate an associative array mapping known shells to the line(s)
+#   needed to export SSH_AUTH_SOCK in that shell.
+shell::init_export_map() {
+  local -n export_map_ref="${1}"
+
+  export_map_ref=(
+    [bash]='export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"'
+    [zsh]='export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"'
+    [fish]='set -x SSH_AUTH_SOCK $XDG_RUNTIME_DIR/ssh-agent.socket'
+    [elvish]='env:SSH_AUTH_SOCK = (path join $E:xdg_runtime_dir ssh-agent.socket)'
+    # Other shells can be added here...
+  )
+}
+
+# shell::init_maps <map-var>
+#   Populate an associative array mapping map types to the names of the corresponding
+#   associative arrays. This provides access to all shell-related maps (e.g., RC paths,
+#   export lines) by type.
+shell::init_maps() {
+  local -n maps_ref="${1}"
+
+  local -A shell_rc_map
+  local -A shell_export_map
+
+  shell::shell::init_shell_rc_map shell_rc_map
+  shell::init_export_map shell_export_map
+
+  maps_ref=(
+    [rc]="shell_rc_map"
+    [export]="shell_export_map"
+  )
+}
+
 # Helper function to infer the current shell name if the user hasn't explicitly selected one.
 shell::get_current_shell_name() {
   local shell_name
@@ -486,10 +520,13 @@ __WAKE_UP_SUNSHINE__
 # Append SSH_AUTH_SOCK export to shell RC if missing.
 patch_shell_rc() {
   local -n rc_files_to_patch="${1}"
-  local export_line='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+  local -n export_map="${2}"
+  local shell rc_file export_line
 
   for shell in "${!rc_files_to_patch[@]}"; do
-    local rc_file="${rc_files_to_patch["${shell}"]}"
+    rc_file="${rc_files_to_patch["${shell}"]}"
+    export_line="${export_map["${shell}"]}"
+
     logging::log_info "Setting up SSH_AUTH_SOCK for ${shell}"
 
     if [[ ! -f ${rc_file} ]]; then
@@ -528,12 +565,13 @@ reload_and_start() {
 main() {
   local -a keys=() # Pass keys around via nameref
   local -A shell_rc_map
+  local -A shell_export_map
   local -A enabled_shell_rc_map
   local -A selected_shells
   local -A resolved_rc_files_to_patch
 
   source_and_setup_logging
-  
+
   if ! [[ -t 0 ]]; then
     logging::log_fatal "This script must be run interactively (stdin is not a tty)."
   fi
@@ -547,6 +585,7 @@ main() {
   generate_add_service keys
 
   shell::init_shell_rc_map shell_rc_map
+  shell::init_export_map shell_export_map
   shell::get_enabled_shells shell_rc_map enabled_shell_rc_map
   shell::prompt_user_selection enabled_shell_rc_map selected_shells || {
     logging::log_warn "Shell selection aborted. Exiting."
@@ -555,7 +594,7 @@ main() {
   shell::print_selected_shells selected_shells
 
   resolve_all_rc_files selected_shells resolved_rc_files_to_patch
-  patch_shell_rc resolved_rc_files_to_patch
+  patch_shell_rc resolved_rc_files_to_patch shell_export_map
   reload_and_start
 }
 
