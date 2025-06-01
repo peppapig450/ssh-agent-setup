@@ -162,6 +162,40 @@ shell::init_shell_rc_map() {
   )
 }
 
+# shell::init_export_map <map-var>
+#   Populate an associative array mapping known shells to the line(s)
+#   needed to export SSH_AUTH_SOCK in that shell.
+shell::init_export_map() {
+  local -n export_map_ref="${1}"
+
+  export_map_ref=(
+    [bash]='export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"'
+    [zsh]='export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/ssh-agent.socket"'
+    [fish]='set -x SSH_AUTH_SOCK $XDG_RUNTIME_DIR/ssh-agent.socket'
+    [elvish]='env:SSH_AUTH_SOCK = (path join $E:xdg_runtime_dir ssh-agent.socket)'
+    # Other shells can be added here...
+  )
+}
+
+# shell::init_maps <map-var>
+#   Populate an associative array mapping map types to the names of the corresponding
+#   associative arrays. This provides access to all shell-related maps (e.g., RC paths,
+#   export lines) by type.
+shell::init_maps() {
+  local -n maps_ref="${1}"
+
+  local -A shell_rc_map
+  local -A shell_export_map
+
+  shell::shell::init_shell_rc_map shell_rc_map
+  shell::init_export_map shell_export_map
+
+  maps_ref=(
+    [rc]="shell_rc_map"
+    [export]="shell_export_map"
+  )
+}
+
 # Helper function to infer the current shell name if the user hasn't explicitly selected one.
 shell::get_current_shell_name() {
   local shell_name
@@ -259,7 +293,7 @@ shell::prompt_user_selection() {
       logging::log_warn "Skipping shell RC update."
       return 1
     fi
-    
+
     read -rp "Enter the number(s) of the shells to modify (e.g., 1 3): " -a indices
 
     if ((${#indices[@]} == 0)); then
@@ -318,13 +352,13 @@ shell::print_selected_shells() {
 }
 
 chezmoi::load_helpers() {
-  if ! command -v chezmoi >/dev/null || ! command -v jq >/dev/null; then
+  if ! command -v chezmoi > /dev/null || ! command -v jq > /dev/null; then
     return 1
   fi
 
   chezmoi::get_managed_mappings() {
-    chezmoi managed -i files -p all -f json |
-      jq -er 'to_entries[] | [.value.absolute, .value.sourceAbsolute] | @tsv'
+    chezmoi managed -i files -p all -f json \
+      | jq -er 'to_entries[] | [.value.absolute, .value.sourceAbsolute] | @tsv'
   }
 
   chezmoi::populate_map() {
@@ -355,7 +389,7 @@ resolve_all_rc_files() {
     local -A chezmoi_map
     chezmoi::populate_map chezmoi_map
     # XXX: maybe double-check that the mapping is populated here
-    (( ++check_chezmoi ))
+    ((++check_chezmoi))
   else
     logging::log_info "Chezmoi not installed... skipping chezmoi management checks."
   fi
@@ -367,7 +401,7 @@ resolve_all_rc_files() {
     resolved_rc_path="$(resolve_file_path "${rc_path}")"
 
     # check chezmoi only if it's needed
-    if (( check_chezmoi == 1 )); then
+    if ((check_chezmoi == 1)); then
       local chezmoi_file="${chezmoi_map["${resolved_rc_path}"]-}"
 
       if [[ -n ${chezmoi_file:-} && -f ${chezmoi_file:-} ]]; then
@@ -455,14 +489,52 @@ generate_add_service() {
   logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
 }
 
+# Prompt the user to create the RC file if it is missing.
+handle_missing_rc_file() {
+  local -r rc_file="${1}"
+  local -r export_line="${2}"
+
+  read -rp "RC file '${rc_file}' does not exist. Create it? [y/N] " create_rc
+  case "${create_rc@L}" in
+    y | yes)
+      touch -- "${rc_file}"
+      logging::log_info "Created new RC file: ${rc_file}"
+      return 0
+      ;;
+    *)
+      echo
+      logging::log_warn "Skipped creating ${rc_file}."
+      cat <<- __WAKE_UP_SUNSHINE__
+
+To enable SSH agent support for this shell, add following lines to ${rc_file}:
+
+# This agent is brought to you by ssh-agent-setup (by peppapig450)
+${export_line}
+
+__WAKE_UP_SUNSHINE__
+      return 1
+      ;;
+  esac
+}
+
 # Append SSH_AUTH_SOCK export to shell RC if missing.
 patch_shell_rc() {
   local -n rc_files_to_patch="${1}"
-  local export_line='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+  local -n export_map="${2}"
+  local shell rc_file export_line
 
   for shell in "${!rc_files_to_patch[@]}"; do
-    local rc_file="${rc_files_to_patch["${shell}"]}"
+    rc_file="${rc_files_to_patch["${shell}"]}"
+    export_line="${export_map["${shell}"]}"
+
     logging::log_info "Setting up SSH_AUTH_SOCK for ${shell}"
+
+    if [[ ! -f ${rc_file} ]]; then
+      handle_missing_rc_file "${rc_file}" "${export_line}" || {
+        logging::log_warn "Skipped configuring SSH_AUTH_SOCK for ${shell} (no RC file)."
+        continue
+      }
+    fi
 
     if ! grep -qxF "${export_line}" "${rc_file}"; then
       cat <<- BOOM_SHAKALAKA >> "${rc_file}"
@@ -493,11 +565,16 @@ reload_and_start() {
 main() {
   local -a keys=() # Pass keys around via nameref
   local -A shell_rc_map
+  local -A shell_export_map
   local -A enabled_shell_rc_map
   local -A selected_shells
   local -A resolved_rc_files_to_patch
 
   source_and_setup_logging
+
+  if ! [[ -t 0 ]]; then
+    logging::log_fatal "This script must be run interactively (stdin is not a tty)."
+  fi
 
   parse_args keys "$@"
   check_dependencies
@@ -508,6 +585,7 @@ main() {
   generate_add_service keys
 
   shell::init_shell_rc_map shell_rc_map
+  shell::init_export_map shell_export_map
   shell::get_enabled_shells shell_rc_map enabled_shell_rc_map
   shell::prompt_user_selection enabled_shell_rc_map selected_shells || {
     logging::log_warn "Shell selection aborted. Exiting."
@@ -516,7 +594,7 @@ main() {
   shell::print_selected_shells selected_shells
 
   resolve_all_rc_files selected_shells resolved_rc_files_to_patch
-  patch_shell_rc resolved_rc_files_to_patch
+  patch_shell_rc resolved_rc_files_to_patch shell_export_map
   reload_and_start
 }
 
