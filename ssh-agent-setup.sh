@@ -193,25 +193,6 @@ shell::init_export_map() {
   )
 }
 
-# shell::init_maps <map-var>
-#   Populate an associative array mapping map types to the names of the corresponding
-#   associative arrays. This provides access to all shell-related maps (e.g., RC paths,
-#   export lines) by type.
-shell::init_maps() {
-  local -n maps_ref="${1}"
-
-  local -A shell_rc_map
-  local -A shell_export_map
-
-  shell::shell::init_shell_rc_map shell_rc_map
-  shell::init_export_map shell_export_map
-
-  maps_ref=(
-    [rc]="shell_rc_map"
-    [export]="shell_export_map"
-  )
-}
-
 # Helper function to infer the current shell name if the user hasn't explicitly selected one.
 shell::get_current_shell_name() {
   local shell_name
