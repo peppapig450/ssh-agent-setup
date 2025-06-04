@@ -489,7 +489,7 @@ generate_add_service() {
   local -r final_add_service="$(path::get_path paths_ref final_add_service)"
 
   # join keys into a newline-separated string for awk
-  keys_concat=$(printf '%s\n' "${keys_ref[@]}")
+  printf -v keys_concat "%s\n" "${keys_ref[@]}"
   ssh_add_bin=$(command -pv ssh-add) || {
     logging::log_fatal "ssh-add not found.. Why are you running an ssh-add script?"
   }
