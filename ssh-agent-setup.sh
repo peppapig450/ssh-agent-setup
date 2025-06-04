@@ -310,7 +310,7 @@ shell::prompt_user_selection() {
         case "${confirm_all@L}" in
           y | yes)
             for shell in "${!enabled_shell_rc_map_ref[@]}"; do
-              selected_shells_ref["$shell"]="${enabled_shell_rc_map_ref[$shell]}"
+              selected_shells_ref["${shell}"]="${enabled_shell_rc_map_ref["${shell}"]}"
             done
             ;;
           *)
