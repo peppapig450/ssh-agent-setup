@@ -153,15 +153,33 @@ check_dependencies() {
   done
 }
 
-# Initialize paths for templates and output
-init_paths() {
+# Initialize paths for templates and output, store in an associative array
+path::init_paths() {
+  local -n paths_ref="${1}"
   local config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
 
-  SERVICE_DIR="${config_home}/systemd/user"
-  SRC_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  TEMPLATE_ADD_SERVICE="${SRC_DIR}/ssh-add.service"
-  AGENT_SERVICE_SRC="${SRC_DIR}/ssh-agent.service"
-  FINAL_ADD_SERVICE="${SERVICE_DIR}/ssh-add.service"
+  paths_ref=(
+    [service_dir]="${config_home}/systemd/user"
+    [src_dir]="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  )
+  paths_ref[template_add_service]="${paths_ref[src_dir]}/ssh-add.service"
+  paths_ref[agent_service_src]="${paths_ref[src_dir]}/ssh-agent.service"
+  paths_ref[final_add_service]="${paths_ref[service_dir]}/ssh-add.service"
+  paths_ref[final_agent_service]="${paths_ref[service_dir]}/ssh-agent.service"
+}
+
+# path::get_path <path-array> <key>
+#   Helper function to retrieve paths from the paths array cleanly.
+path::get_path() {
+  local -n paths_ref="${1}"
+  local key="${2}"
+
+  if [[ -v ${paths_ref[${key}]} ]]; then
+    printf "%s\n" "${paths_ref["${key}"]}"
+  else
+    logging::log_fatal "get_path: key ${key} not found in array"
+    return 1
+  fi
 }
 
 # shell::init_shell_rc_map <map-var>
@@ -420,18 +438,25 @@ resolve_all_rc_files() {
 
 # Ensure the systemd user directory exists.
 prepare_service_dir() {
-  mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
-  logging::log_info "Service directory ensured: ${SERVICE_DIR}"
+  local -n paths_ref="${1}"
+  local -r service_dir="$(path::get_path paths_ref service_dir)"
+
+  mkdir -p -- "${service_dir}" # Avoid race conditions like a smart cookie
+  logging::log_info "Service directory ensured: ${service_dir}"
 }
 
 # Symlink the ssh-agent.service template.
 link_agent() {
-  if [[ -f ${AGENT_SERVICE_SRC} ]]; then
+  local -n paths_ref="${1}"
+  local -r agent_service_src="$(path::get_path paths_ref agent_service_src)"
+  local -r final_agent_service="$(path::get_path paths_ref final_agent_service)"
+
+  if [[ -f ${agent_service_src} ]]; then
     # XXX: switch to using install?
-    ln -nfs -- "${AGENT_SERVICE_SRC}" "${SERVICE_DIR}/ssh-agent.service"
+    ln -nfs -- "${agent_service_src}" "${final_agent_service}"
     logging::log_info "Linked ssh-agent.service"
   else
-    logging::log_fatal "Template missing: ${AGENT_SERVICE_SRC}"
+    logging::log_fatal "Template missing: ${agent_service_src}"
   fi
 }
 
@@ -455,10 +480,13 @@ validate_keys() {
 
 # Build ssh-add.service by injecting ExecStart lines with awk.
 generate_add_service() {
-  local -r _dest="${1}"
-  local -n keys_ref="${_dest}"
+  local -n keys_ref="${1}"
+  local -n paths_ref="${2}"
 
   local keys_concat ssh_add_bin
+
+  local -r template_add_service="$(path::get_path paths_ref template_add_service)"
+  local -r final_add_service="$(path::get_path paths_ref final_add_service)"
 
   # join keys into a newline-separated string for awk
   keys_concat=$(printf '%s\n' "${keys_ref[@]}")
@@ -484,9 +512,9 @@ generate_add_service() {
 		}
 		# Leave the other lines alone
 		{ print }
-	' "${TEMPLATE_ADD_SERVICE}" > "${FINAL_ADD_SERVICE}"
+	' "${template_add_service}" > "${final_add_service}"
 
-  chmod 600 "${FINAL_ADD_SERVICE}"
+  chmod 600 "${final_add_service}"
   logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
 }
 
@@ -565,6 +593,7 @@ reload_and_start() {
 # 5) reload and start
 main() {
   local -a keys=() # Pass keys around via nameref
+  local -A paths
   local -A shell_rc_map
   local -A shell_export_map
   local -A enabled_shell_rc_map
@@ -579,11 +608,11 @@ main() {
 
   parse_args keys "$@"
   check_dependencies
-  init_paths
-  prepare_service_dir
-  link_agent
+  path::init_paths paths
+  prepare_service_dir paths
+  link_agent paths
   validate_keys keys
-  generate_add_service keys
+  generate_add_service keys paths
 
   shell::init_shell_rc_map shell_rc_map
   shell::init_export_map shell_export_map
