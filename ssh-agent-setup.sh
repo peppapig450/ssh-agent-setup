@@ -309,10 +309,11 @@ shell::prompt_user_selection() {
   else
     if [[ ! -t 0 ]]; then
       logging::log_warn "Non-interactive session detected and fzf is not available."
-      logging::log_warn "Skipping shell RC update."
+      logging::log_warn "Skipping shell RC update entirely because no interactive input is possible."
       return 1
     fi
 
+    logging::log_info "fzf not found. Falling back to manual read prompt."
     read -rp "Enter the number(s) of the shells to modify (e.g., 1 3): " -a indices
 
     if ((${#indices[@]} == 0)); then
