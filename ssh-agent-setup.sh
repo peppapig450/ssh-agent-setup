@@ -581,8 +581,8 @@ BOOM_SHAKALAKA
 
 # Reload user daemon and enable/start services.
 reload_and_start() {
-  systemctl --user daemon-reload
-  systemctl --user enable --now ssh-agent.service ssh-add.service
+  systemctl --user daemon-reload || logging::log_fatal "daemon-reload failed. Check your systemd setup."
+  systemctl --user enable --now ssh-agent.service ssh-add.service || logging::log_fatal "Failed to enable/start ssh-agent.service and/or ssh-add.service."
   logging::log_info "Enabled and started ssh-agent & ssh-add services"
 }
 
