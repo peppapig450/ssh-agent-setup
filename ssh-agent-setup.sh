@@ -307,7 +307,7 @@ shell::prompt_user_selection() {
     logging::log_info "fzf detected. Launching interactive selector..."
     mapfile -t selections < <(printf "%s\n" "${!enabled_shell_rc_map_ref[@]}" | fzf --multi --prompt="Select shells: ")
   else
-    if ! [[ -t 0 ]]; then
+    if [[ ! -t 0 ]]; then
       logging::log_warn "Non-interactive session detected and fzf is not available."
       logging::log_warn "Skipping shell RC update."
       return 1
@@ -340,7 +340,7 @@ shell::prompt_user_selection() {
     fi
 
     for index in "${indices[@]}"; do
-      if ! [[ ${index} =~ ^[0-9]+$ ]]; then
+      if [[ ! ${index} =~ ^[0-9]+$ ]]; then
         logging::log_warn "Invalid input (not a number): ${index}"
         continue
       fi
@@ -602,7 +602,7 @@ main() {
 
   source_and_setup_logging
 
-  if ! [[ -t 0 ]]; then
+  if [[ ! -t 0 ]]; then
     logging::log_fatal "This script must be run interactively (stdin is not a tty)."
   fi
 
