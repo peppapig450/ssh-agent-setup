@@ -214,7 +214,7 @@ shell::get_enabled_shells() {
   # This avoids shell path ambiguity (e.g., both /bin/zsh and /usr/bin/zsh),
   # and aligns better with what command -v outputs.
   # Using Perl here for sane text handling and associative hash logic in one pass.
-  mapfile -t valid_shells < <(
+  if ! mapfile -t valid_shells < <(
     perl -ne '
       next unless m{^/}; # Skip non-path lines
       chomp;
@@ -222,9 +222,13 @@ shell::get_enabled_shells() {
       $best{$base} = $_ if ! $best{$base} || $best{$base} =~ m{^/bin}; # Prefer /usr/bin
       END { print "$_\n" for sort values %best }
     ' /etc/shells
-  ) \
-    && ((${#valid_shells[@]} > 0)) \
-    || logging::log_fatal "No valid shells found in /etc/shells"
+  ); then
+    logging::log_fatal "No valid shells found in /etc/shells (mapfile failed)"
+  fi
+
+  if ((${#valid_shells[@]} == 0)); then
+    logging::log_fatal "No valid shells found in /etc/shells (empty list)"
+  fi
 
   for shell in "${!shell_rc_map_ref[@]}"; do
     local shell_path
