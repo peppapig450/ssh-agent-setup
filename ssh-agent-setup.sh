@@ -145,12 +145,17 @@ parse_args() {
 # Verify required external commands exist.
 check_dependencies() {
   local deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+  local -a missing
 
   for cmd in "${deps[@]}"; do
     if ! command -v "${cmd}" > /dev/null 2>&1; then
-      logging::log_fatal "Required command '${cmd}' not found."
+      missing+=("${cmd}")
     fi
   done
+
+  if (( ${#missing[@]} )); then
+    logging::log_fatal "Missing required commands: ${missing[*]}"
+  fi
 }
 
 # Initialize paths for templates and output, store in an associative array
