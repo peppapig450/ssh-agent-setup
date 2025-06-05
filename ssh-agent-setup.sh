@@ -144,7 +144,7 @@ parse_args() {
 
 # Verify required external commands exist.
 check_dependencies() {
-  local deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+  local -a deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
   local -a missing
 
   for cmd in "${deps[@]}"; do
@@ -608,7 +608,7 @@ reload_and_start() {
 # 4) generate systemd services & patch RCs
 # 5) reload and start
 main() {
-  local -a keys=() # Pass keys around via nameref
+  local -a keys # Pass keys around via nameref
   local -A paths
   local -A shell_rc_map
   local -A shell_export_map
