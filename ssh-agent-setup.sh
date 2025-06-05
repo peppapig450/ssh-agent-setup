@@ -556,7 +556,7 @@ __WAKE_UP_SUNSHINE__
 patch_shell_rc() {
   local -n rc_files_to_patch="${1}"
   local -n export_map="${2}"
-  local shell rc_file export_line
+  local shell rc_file export_line newline_check
 
   for shell in "${!rc_files_to_patch[@]}"; do
     rc_file="${rc_files_to_patch["${shell}"]}"
@@ -571,16 +571,26 @@ patch_shell_rc() {
       }
     fi
 
-    if ! grep -qxF "${export_line}" "${rc_file}"; then
-      cat <<- BOOM_SHAKALAKA >> "${rc_file}"
+    # If the exact export_line is not present, but maybe a similar SSH_AUTH_SOCK line is,
+    # skip to avoid duplicates.
+    if grep -qxF "${export_line}" "${rc_file}"; then
+      logging::log_info "Exact SSH_AUTH_SOCK already present in ${rc_file}; skipping."
+      continue
+    elif grep -q "SSH_AUTH_SOCK" "${rc_file}"; then
+      logging::log_warn "Another SSH_AUTH_SOCK appears in ${rc_file}; please verify manually."
+      continue
+    fi
 
+    # Only append one blank line if the file doesn't already end with a blank line.
+    newline_check="$(tail -n1 "${rc_file}")"
+    if [[ -n ${newline_check} ]]; then
+      printf "\n" >> "${rc_file}"
+    fi
+    cat <<- BOOM_SHAKALAKA >> "${rc_file}"
 # Added by ssh-agent-setup
 ${export_line}
 BOOM_SHAKALAKA
-      logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
-    else
-      logging::log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
-    fi
+    logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
   done
 }
 
