@@ -144,24 +144,47 @@ parse_args() {
 
 # Verify required external commands exist.
 check_dependencies() {
-  local deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+  local -a deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
+  local -a missing
 
   for cmd in "${deps[@]}"; do
     if ! command -v "${cmd}" > /dev/null 2>&1; then
-      logging::log_fatal "Required command '${cmd}' not found."
+      missing+=("${cmd}")
     fi
   done
+
+  if (( ${#missing[@]} )); then
+    logging::log_fatal "Missing required commands: ${missing[*]}"
+  fi
 }
 
-# Initialize paths for templates and output
-init_paths() {
+# Initialize paths for templates and output, store in an associative array
+path::init_paths() {
+  local -n paths_ref="${1}"
   local config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
 
-  SERVICE_DIR="${config_home}/systemd/user"
-  SRC_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  TEMPLATE_ADD_SERVICE="${SRC_DIR}/ssh-add.service"
-  AGENT_SERVICE_SRC="${SRC_DIR}/ssh-agent.service"
-  FINAL_ADD_SERVICE="${SERVICE_DIR}/ssh-add.service"
+  paths_ref=(
+    [service_dir]="${config_home}/systemd/user"
+    [src_dir]="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  )
+  paths_ref[template_add_service]="${paths_ref[src_dir]}/ssh-add.service"
+  paths_ref[agent_service_src]="${paths_ref[src_dir]}/ssh-agent.service"
+  paths_ref[final_add_service]="${paths_ref[service_dir]}/ssh-add.service"
+  paths_ref[final_agent_service]="${paths_ref[service_dir]}/ssh-agent.service"
+}
+
+# path::get_path <path-array> <key>
+#   Helper function to retrieve paths from the paths array cleanly.
+path::get_path() {
+  local -n paths_ref="${1}"
+  local key="${2}"
+
+  if [[ -v ${paths_ref[${key}]} ]]; then
+    printf "%s\n" "${paths_ref["${key}"]}"
+  else
+    logging::log_fatal "get_path: key ${key} not found in array"
+    return 1
+  fi
 }
 
 # shell::init_shell_rc_map <map-var>
@@ -214,7 +237,7 @@ shell::get_enabled_shells() {
   # This avoids shell path ambiguity (e.g., both /bin/zsh and /usr/bin/zsh),
   # and aligns better with what command -v outputs.
   # Using Perl here for sane text handling and associative hash logic in one pass.
-  mapfile -t valid_shells < <(
+  if ! mapfile -t valid_shells < <(
     perl -ne '
       next unless m{^/}; # Skip non-path lines
       chomp;
@@ -222,9 +245,13 @@ shell::get_enabled_shells() {
       $best{$base} = $_ if ! $best{$base} || $best{$base} =~ m{^/bin}; # Prefer /usr/bin
       END { print "$_\n" for sort values %best }
     ' /etc/shells
-  ) \
-    && ((${#valid_shells[@]} > 0)) \
-    || logging::log_fatal "No valid shells found in /etc/shells"
+  ); then
+    logging::log_fatal "No valid shells found in /etc/shells (mapfile failed)"
+  fi
+
+  if ((${#valid_shells[@]} == 0)); then
+    logging::log_fatal "No valid shells found in /etc/shells (empty list)"
+  fi
 
   for shell in "${!shell_rc_map_ref[@]}"; do
     local shell_path
@@ -285,12 +312,13 @@ shell::prompt_user_selection() {
     logging::log_info "fzf detected. Launching interactive selector..."
     mapfile -t selections < <(printf "%s\n" "${!enabled_shell_rc_map_ref[@]}" | fzf --multi --prompt="Select shells: ")
   else
-    if ! [[ -t 0 ]]; then
+    if [[ ! -t 0 ]]; then
       logging::log_warn "Non-interactive session detected and fzf is not available."
-      logging::log_warn "Skipping shell RC update."
+      logging::log_warn "Skipping shell RC update entirely because no interactive input is possible."
       return 1
     fi
 
+    logging::log_info "fzf not found. Falling back to manual read prompt."
     read -rp "Enter the number(s) of the shells to modify (e.g., 1 3): " -a indices
 
     if ((${#indices[@]} == 0)); then
@@ -306,7 +334,7 @@ shell::prompt_user_selection() {
         case "${confirm_all@L}" in
           y | yes)
             for shell in "${!enabled_shell_rc_map_ref[@]}"; do
-              selected_shells_ref["$shell"]="${enabled_shell_rc_map_ref[$shell]}"
+              selected_shells_ref["${shell}"]="${enabled_shell_rc_map_ref["${shell}"]}"
             done
             ;;
           *)
@@ -318,7 +346,7 @@ shell::prompt_user_selection() {
     fi
 
     for index in "${indices[@]}"; do
-      if ! [[ ${index} =~ ^[0-9]+$ ]]; then
+      if [[ ! ${index} =~ ^[0-9]+$ ]]; then
         logging::log_warn "Invalid input (not a number): ${index}"
         continue
       fi
@@ -416,18 +444,25 @@ resolve_all_rc_files() {
 
 # Ensure the systemd user directory exists.
 prepare_service_dir() {
-  mkdir -p -- "${SERVICE_DIR}" # Avoid race conditions like a smart cookie
-  logging::log_info "Service directory ensured: ${SERVICE_DIR}"
+  local -n paths_ref="${1}"
+  local -r service_dir="$(path::get_path paths_ref service_dir)"
+
+  mkdir -p -- "${service_dir}" # Avoid race conditions like a smart cookie
+  logging::log_info "Service directory ensured: ${service_dir}"
 }
 
 # Symlink the ssh-agent.service template.
 link_agent() {
-  if [[ -f ${AGENT_SERVICE_SRC} ]]; then
+  local -n paths_ref="${1}"
+  local -r agent_service_src="$(path::get_path paths_ref agent_service_src)"
+  local -r final_agent_service="$(path::get_path paths_ref final_agent_service)"
+
+  if [[ -f ${agent_service_src} ]]; then
     # XXX: switch to using install?
-    ln -nfs -- "${AGENT_SERVICE_SRC}" "${SERVICE_DIR}/ssh-agent.service"
+    ln -nfs -- "${agent_service_src}" "${final_agent_service}"
     logging::log_info "Linked ssh-agent.service"
   else
-    logging::log_fatal "Template missing: ${AGENT_SERVICE_SRC}"
+    logging::log_fatal "Template missing: ${agent_service_src}"
   fi
 }
 
@@ -451,13 +486,16 @@ validate_keys() {
 
 # Build ssh-add.service by injecting ExecStart lines with awk.
 generate_add_service() {
-  local -r _dest="${1}"
-  local -n keys_ref="${_dest}"
+  local -n keys_ref="${1}"
+  local -n paths_ref="${2}"
 
   local keys_concat ssh_add_bin
 
+  local -r template_add_service="$(path::get_path paths_ref template_add_service)"
+  local -r final_add_service="$(path::get_path paths_ref final_add_service)"
+
   # join keys into a newline-separated string for awk
-  keys_concat=$(printf '%s\n' "${keys_ref[@]}")
+  printf -v keys_concat "%s\n" "${keys_ref[@]}"
   ssh_add_bin=$(command -pv ssh-add) || {
     logging::log_fatal "ssh-add not found.. Why are you running an ssh-add script?"
   }
@@ -480,9 +518,9 @@ generate_add_service() {
 		}
 		# Leave the other lines alone
 		{ print }
-	' "${TEMPLATE_ADD_SERVICE}" > "${FINAL_ADD_SERVICE}"
+	' "${template_add_service}" > "${final_add_service}"
 
-  chmod 600 "${FINAL_ADD_SERVICE}"
+  chmod 600 "${final_add_service}"
   logging::log_info "Created ssh-add.service with keys: \"${keys_ref[*]}\""
 }
 
@@ -518,7 +556,7 @@ __WAKE_UP_SUNSHINE__
 patch_shell_rc() {
   local -n rc_files_to_patch="${1}"
   local -n export_map="${2}"
-  local shell rc_file export_line
+  local shell rc_file export_line newline_check
 
   for shell in "${!rc_files_to_patch[@]}"; do
     rc_file="${rc_files_to_patch["${shell}"]}"
@@ -533,23 +571,33 @@ patch_shell_rc() {
       }
     fi
 
-    if ! grep -qxF "${export_line}" "${rc_file}"; then
-      cat <<- BOOM_SHAKALAKA >> "${rc_file}"
+    # If the exact export_line is not present, but maybe a similar SSH_AUTH_SOCK line is,
+    # skip to avoid duplicates.
+    if grep -qxF "${export_line}" "${rc_file}"; then
+      logging::log_info "Exact SSH_AUTH_SOCK already present in ${rc_file}; skipping."
+      continue
+    elif grep -q "SSH_AUTH_SOCK" "${rc_file}"; then
+      logging::log_warn "Another SSH_AUTH_SOCK appears in ${rc_file}; please verify manually."
+      continue
+    fi
 
+    # Only append one blank line if the file doesn't already end with a blank line.
+    newline_check="$(tail -n1 "${rc_file}")"
+    if [[ -n ${newline_check} ]]; then
+      printf "\n" >> "${rc_file}"
+    fi
+    cat <<- BOOM_SHAKALAKA >> "${rc_file}"
 # Added by ssh-agent-setup
 ${export_line}
 BOOM_SHAKALAKA
-      logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
-    else
-      logging::log_info "SSH_AUTH_SOCK already configured in ${rc_file}"
-    fi
+    logging::log_info "Appended SSH_AUTH_SOCK to ${rc_file}"
   done
 }
 
 # Reload user daemon and enable/start services.
 reload_and_start() {
-  systemctl --user daemon-reload
-  systemctl --user enable --now ssh-agent.service ssh-add.service
+  systemctl --user daemon-reload || logging::log_fatal "daemon-reload failed. Check your systemd setup."
+  systemctl --user enable --now ssh-agent.service ssh-add.service || logging::log_fatal "Failed to enable/start ssh-agent.service and/or ssh-add.service."
   logging::log_info "Enabled and started ssh-agent & ssh-add services"
 }
 
@@ -560,7 +608,8 @@ reload_and_start() {
 # 4) generate systemd services & patch RCs
 # 5) reload and start
 main() {
-  local -a keys=() # Pass keys around via nameref
+  local -a keys # Pass keys around via nameref
+  local -A paths
   local -A shell_rc_map
   local -A shell_export_map
   local -A enabled_shell_rc_map
@@ -569,17 +618,17 @@ main() {
 
   source_and_setup_logging
 
-  if ! [[ -t 0 ]]; then
+  if [[ ! -t 0 ]]; then
     logging::log_fatal "This script must be run interactively (stdin is not a tty)."
   fi
 
   parse_args keys "$@"
   check_dependencies
-  init_paths
-  prepare_service_dir
-  link_agent
+  path::init_paths paths
+  prepare_service_dir paths
+  link_agent paths
   validate_keys keys
-  generate_add_service keys
+  generate_add_service keys paths
 
   shell::init_shell_rc_map shell_rc_map
   shell::init_export_map shell_export_map
