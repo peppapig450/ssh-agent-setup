@@ -176,11 +176,11 @@ path::init_paths() {
 # path::get_path <path-array> <key>
 #   Helper function to retrieve paths from the paths array cleanly.
 path::get_path() {
-  local -n paths_ref="${1}"
+  local -n __paths_ref="${1}"
   local key="${2}"
 
-  if [[ -v ${paths_ref[${key}]} ]]; then
-    printf "%s\n" "${paths_ref["${key}"]}"
+  if [[ -v __paths_ref["${key}"] ]]; then
+    printf "%s\n" "${__paths_ref["${key}"]}"
   else
     logging::log_fatal "get_path: key ${key} not found in array"
     return 1
