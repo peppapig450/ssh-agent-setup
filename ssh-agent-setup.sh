@@ -69,13 +69,13 @@ resolve_file_path() {
 
 # source_and_setup_logging
 #
-# Resolves this script's directory, builds the path to the logging library
-# (assumed at ../../shell/general/logging.shlib), and sources it. Exits if missing.
+# Resolves this script's directory, builds the path to the logging library,
+# and sources it. Exits if missing.
 #
 # This loads the namespaced logging functions defined in logging.shlib:
-#   - logging::init logging::log_info, logging::log_warn, logging::log_error,
+#   - logging::init, logging::log_info, logging::log_warn, logging::log_error,
 #   - logging::log_fatal, logging::add_err_trap, logging::trap_err_handler
-#   - logging::setup_traps logging::add_exit_trap
+#   - logging::setup_traps, logging::add_exit_trap
 #
 # The `logging::` prefix follows the convention described in the
 # Google Shell Style Guide: https://google.github.io/styleguide/shellguide.html
@@ -83,10 +83,10 @@ source_and_setup_logging() {
   local script_dir logging_path
 
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  logging_path="$(resolve_file_path "${script_dir}/../../shell/general/logging.shlib")"
+  logging_path="$(resolve_file_path "${script_dir}/lib/logging/logging.lib.sh")"
 
   if [[ -f ${logging_path} ]]; then
-    # shellcheck source=../../shell/general/logging.shlib
+    # shellcheck source=lib/logging/logging.lib.sh
     source "${logging_path}"
     logging::init "$0"
   else
@@ -145,7 +145,7 @@ parse_args() {
 # Verify required external commands exist.
 check_dependencies() {
   local -a deps=(systemctl awk grep perl ssh-add) # Check grep and awk in case someone manages to run this on a toaster
-  local -a missing
+  local -a missing=()
 
   for cmd in "${deps[@]}"; do
     if ! command -v "${cmd}" > /dev/null 2>&1; then
