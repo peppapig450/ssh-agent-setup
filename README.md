@@ -1,6 +1,6 @@
 # SSH Agent Automation
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache-2.0-yellow.svg)](./LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](./LICENSE)
 
 A production-ready toolkit to automate SSH agent management on Linux via systemd user services, featuring auto-start, key loading, and multi-shell integration.
 
